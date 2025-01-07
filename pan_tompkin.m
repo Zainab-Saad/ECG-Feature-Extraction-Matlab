@@ -341,6 +341,40 @@ qrs_i_raw = qrs_i_raw(1:Beat_C1);
 qrs_amp_raw = qrs_amp_raw(1:Beat_C1);
 qrs_c = qrs_c(1:Beat_C);
 qrs_i = qrs_i(1:Beat_C);
+
+%% ======================= Q- Peaks ================================= %%
+% Q_peaks=[];
+% S_peaks = [];
+% for i = qrs_i_raw
+%   q_found = 0;
+%   s_found = 0;
+%     for j = 1: round(0.25*fs)
+%         z=i-j;
+%             if(ecg_h(z)<ecg_h(z+1) && ecg_h(z) <ecg_h(z-1) && q_found == 0)
+%                 Q_peaks=[Q_peaks z]; 
+%                 q_found =1;
+%             end
+%         z=i+j;
+%             if(ecg_h(z)<ecg_h(z+1) && ecg_h(z) <ecg_h(z-1) && s_found == 0)
+%                 S_peaks=[S_peaks z];
+%                 s_found = 1;
+%             end
+%    end
+% end\
+
+Q_peaks=[];
+S_peaks = [];
+for i = qrs_i_raw
+  [q_c,q_i] = min ( ecg_h(i - round(0.25*fs): i))
+  [s_c,s_i] = min ( ecg_h(i: i + round(0.25*fs)))
+  Q_peaks = [Q_peaks i-q_i]
+  S_peaks = [S_peaks i+s_i]
+end
+
+
+
+
+
 %% ======================= Plottings ================================= %%
 if gr
   hold on,scatter(qrs_i,qrs_c,'m');
@@ -362,6 +396,8 @@ end
    title('QRS on Filtered Signal');
    axis tight;
    hold on,scatter(qrs_i_raw,qrs_amp_raw,'m');
+   hold on,scatter(Q_peaks,ecg_h(Q_peaks),'b');
+   hold on,scatter(S_peaks,ecg_h(S_peaks),'k');
    hold on,plot(locs,NOISL_buf1,'LineWidth',2,'Linestyle','--','color','k');
    hold on,plot(locs,SIGL_buf1,'LineWidth',2,'Linestyle','-.','color','r');
    hold on,plot(locs,THRS_buf1,'LineWidth',2,'Linestyle','-.','color','g');
