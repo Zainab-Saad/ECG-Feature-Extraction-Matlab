@@ -2,8 +2,8 @@ display('Reading samples ECG signal from MIT-BIH Arrhythmia Database')
 [ecg,Fs,tm]=rdsamp('mitdbase/207',1);
 
 display(['Reading and plotting annotations (human labels) of QRS complexes performend on the signals'])
-[ann,type,subtype,chan,num,comments] =rdann('mitdbase/207','atr',1);
-%%
+[ann,type,subtype,chan,num]=rdann('mitdbase/207','atr',1);
+
 [R_peaks_val, R_peaks_ind,Q_peaks_ind, Q_peaks_val,S_peaks_ind, S_peaks_val,T_peaks_ind, T_peaks_val, delay] = pan_tompkin(ecg, Fs);
 
 %% RR_int
@@ -62,16 +62,14 @@ end
 
 
 %% Using Comments
-comments2 = comments;
 count =1;
 my_classes = ['N' , 'VFL'];
-rhythm = comments(count);
 while count<length(ann)
+    comments(count) = rhyth
     if (type(count) == '+')
-        rhythm = comments(count);
+        rhythm = cell2mat(comments(count));
+        comments(count) = 'VFL'
     end
-    comments(count) = rhythm;
-
     count = count +1;
 end
 
@@ -79,15 +77,14 @@ end
 %%
 count =1;
 my_classes = ['N' , 'VFL'];
-% map =containers.Map(ann,comments);
 while count<length(ann)
     if (type(count) == '+')
         rhythm = cell2mat(comments(count));
         if ((length(rhythm) == 4) && all(rhythm == '(VFL'))
-            count
+            
         end
-        if ((length(rhythm) == 2) && all(rhythm == '(N'))
-            %count
+        if ((length(rhythm)== 2) && all(rhythm == '(N'))
+            count
         end
     end
     count = count +1;
