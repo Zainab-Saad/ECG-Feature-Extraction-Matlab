@@ -1,4 +1,4 @@
-function [qrs_amp_raw,qrs_i_raw,delay]=pan_tompkin(ecg,fs,gr)
+function [qrs_amp_raw,qrs_i_raw,Q_peaks,Q_peaks_val,S_peaks,S_peaks_val,T_peaks,T_peaks_val,  delay]=pan_tompkin(ecg,fs,gr)
 
 %% function [qrs_amp_raw,qrs_i_raw,delay]=pan_tompkin(ecg,fs)
 % Complete implementation of Pan-Tompkins algorithm
@@ -365,57 +365,65 @@ qrs_i = qrs_i(1:Beat_C);
 Q_peaks=[];
 S_peaks = [];
 for i = qrs_i_raw
-  [q_c,q_i] = min ( ecg_h(i - round(0.25*fs): i))
-  [s_c,s_i] = min ( ecg_h(i: i + round(0.25*fs)))
-  Q_peaks = [Q_peaks i-q_i]
-  S_peaks = [S_peaks i+s_i]
+  [q_c,q_i] = min ( ecg_h(max(1,i - round(0.25*fs)): i));
+
+  [s_c,s_i] = min ( ecg_h(i: min(i + round(0.25*fs),length(ecg_h)-1)));
+  Q_peaks = [Q_peaks, max(1, (i - (round(0.25*fs) - q_i + 1)))];  % Append Q peak
+
+  S_peaks = [S_peaks, i+s_i];
 end
 
-
-
-
-
-%% ======================= Plottings ================================= %%
-if gr
-  hold on,scatter(qrs_i,qrs_c,'m');
-  hold on,plot(locs,NOISL_buf,'--k','LineWidth',2);
-  hold on,plot(locs,SIGL_buf,'--r','LineWidth',2);
-  hold on,plot(locs,THRS_buf,'--g','LineWidth',2);
- if any(ax)
-  ax(~ax) = []; 
-  linkaxes(ax,'x');
-  zoom on;
- end
+T_peaks= [];
+for i = S_peaks
+  [t_c,t_i] = max ( ecg_h(i: min(i + round(0.25*fs),length(ecg_h)-1)));
+  T_peaks = [T_peaks, i+t_i];
 end
+
+Q_peaks_val = ecg_h(Q_peaks);
+S_peaks_val = ecg_h(S_peaks);
+T_peaks_val = ecg_h(T_peaks);
+
+% %% ======================= Plottings ================================= %%
+% if gr
+%   hold on,scatter(qrs_i,qrs_c,'m');
+%   hold on,plot(locs,NOISL_buf,'--k','LineWidth',2);
+%   hold on,plot(locs,SIGL_buf,'--r','LineWidth',2);
+%   hold on,plot(locs,THRS_buf,'--g','LineWidth',2);
+%  if any(ax)
+%   ax(~ax) = []; 
+%   linkaxes(ax,'x');
+%   zoom on;
+%  end
+% end
 
 %% ================== overlay on the signals ========================= %%
  if gr
    figure;
-   az(1)=subplot(311);
    plot(ecg_h);
    title('QRS on Filtered Signal');
    axis tight;
    hold on,scatter(qrs_i_raw,qrs_amp_raw,'m');
    hold on,scatter(Q_peaks,ecg_h(Q_peaks),'b');
    hold on,scatter(S_peaks,ecg_h(S_peaks),'k');
+   hold on,scatter(T_peaks,ecg_h(T_peaks),'g');
+   
    hold on,plot(locs,NOISL_buf1,'LineWidth',2,'Linestyle','--','color','k');
    hold on,plot(locs,SIGL_buf1,'LineWidth',2,'Linestyle','-.','color','r');
    hold on,plot(locs,THRS_buf1,'LineWidth',2,'Linestyle','-.','color','g');
-   az(2)=subplot(312);plot(ecg_m);
-   title('QRS on MVI signal and Noise level(black),Signal Level (red) and Adaptive Threshold(green)');axis tight;
-   hold on,scatter(qrs_i,qrs_c,'m');
-   hold on,plot(locs,NOISL_buf,'LineWidth',2,'Linestyle','--','color','k');
-   hold on,plot(locs,SIGL_buf,'LineWidth',2,'Linestyle','-.','color','r');
-   hold on,plot(locs,THRS_buf,'LineWidth',2,'Linestyle','-.','color','g');
-   az(3)=subplot(313);
-   plot(ecg-mean(ecg));
-   title('Pulse train of the found QRS on ECG signal');
-   axis tight;
-   line(repmat(qrs_i_raw,[2 1]),...
-       repmat([min(ecg-mean(ecg))/2; max(ecg-mean(ecg))/2],size(qrs_i_raw)),...
-       'LineWidth',2.5,'LineStyle','-.','Color','r');
-   linkaxes(az,'x');
-   zoom on;
+  %  az(2)=subplot(312);plot(ecg_m);
+  %  title('QRS on MVI signal and Noise level(black),Signal Level (red) and Adaptive Threshold(green)');axis tight;
+  %  hold on,scatter(qrs_i,qrs_c,'m');
+  %  hold on,plot(locs,NOISL_buf,'LineWidth',2,'Linestyle','--','color','k');
+  %  hold on,plot(locs,SIGL_buf,'LineWidth',2,'Linestyle','-.','color','r');
+  %  hold on,plot(locs,THRS_buf,'LineWidth',2,'Linestyle','-.','color','g');
+  %  az(3)=subplot(313);
+  %  plot(ecg-mean(ecg));
+  %  title('Pulse train of the found QRS on ECG signal');
+  %  axis tight;
+  %  line(repmat(qrs_i_raw,[2 1]),...
+  %      repmat([min(ecg-mean(ecg))/2; max(ecg-mean(ecg))/2],size(qrs_i_raw)),...
+  %      'LineWidth',2.5,'LineStyle','-.','Color','r');
+  zoom on;
  end
 end
  
