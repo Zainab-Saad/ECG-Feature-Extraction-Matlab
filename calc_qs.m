@@ -5,4 +5,5 @@ while i <= length(S_peaks_ind)
     QS_int = [QS_int (S_peaks_ind(i)-Q_peaks_ind(i))/Fs];
     i = i+1;
 end
+QS_int (1) = mean(QS_int);
 end

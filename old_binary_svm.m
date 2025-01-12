@@ -3,11 +3,6 @@ display('Reading samples ECG signal from MIT-BIH Arrhythmia Database')
 
 display(['Reading and plotting annotations (human labels) of QRS complexes performend on the signals'])
 [ann,type,subtype,chan,num,comments] =rdann('mitdbase/207','atr',1);
-
-
-
-%% Adding loop
-
 %% PRE PROCESSING
 [R_peaks_val, R_peaks_ind,Q_peaks_ind, Q_peaks_val,S_peaks_ind, S_peaks_val,T_peaks_ind, T_peaks_val, delay] = pan_tompkin(ecg, Fs);
 
@@ -166,81 +161,74 @@ for i = 1:length(rhythms)
                                                  arrhythmiaData.(rhythmType).S_peak_ind, Fs);
 end
 
-%% Trying Structured SVM ====================================
-%% Prepare Features and Labels
-% Collect features dynamically from `arrhythmiaData`
-rhythmTypes = fieldnames(arrhythmiaData);
-featureNames = {'R_peak_ind', 'Q_peak_ind', 'S_peak_ind', 'T_peak_ind', 'RR_int', 'QS_int'};
-X = [];
-Y = [];
 
-% Assign numerical labels to each rhythm type
-labelMapping = containers.Map(rhythmTypes, 1:length(rhythmTypes));
+%% Feature making
+X = [[VFL_R_peak_ind N_R_peak_ind]' , [VFL_Q_peak_ind N_Q_peak_ind]'... 
+    , [VFL_S_peak_ind N_S_peak_ind]' , [VFL_T_peak_ind N_T_peak_ind]'...
+    [VFL_RR_int N_RR_int]', [VFL_QS_int N_QS_int]'];
 
-for i = 1:length(rhythmTypes)
-    rhythmType = rhythmTypes{i};
-    label = labelMapping(rhythmType);
-    
-    % Extract features for the current rhythm
-    rhythmData = arrhythmiaData.(rhythmType);
-    numObservations = length(rhythmData.R_peak_ind); % Assuming R_peak_ind determines observation count
-    
-    % Initialize a temporary feature matrix
-    tempX = zeros(numObservations, length(featureNames));
-    
-    for j = 1:length(featureNames)
-        feature = rhythmData.(featureNames{j});
-        if ~isempty(feature)
-            % Resize feature vector to match `numObservations` if necessary
-            tempX(:, j) = feature(:);
-        end
-    end
-    
-    % Append the features and labels
-    X = [X; tempX]; % Append features
-    Y = [Y; label * ones(numObservations, 1)]; % Append corresponding labels
-end
 
-%% Split Data into Training and Testing Sets
-% Randomize data order
-rand_num = randperm(size(X, 1));
-X = X(rand_num, :);
-Y = Y(rand_num);
+Y  = (1:length(X));
+Y (1: length(VFL_T_peak_ind)) = 1;
+Y (length(VFL_T_peak_ind):end) = 2;
 
-% Split into training and testing sets (80/20 split)
-trainIdx = 1:round(0.8 * length(Y));
-testIdx = round(0.8 * length(Y)) + 1:length(Y);
 
-X_train = X(trainIdx, :);
-y_train = Y(trainIdx);
+%% ========================= SVM =========================
 
-X_test = X(testIdx, :);
-y_test = Y(testIdx);
+rand_num = randperm(size(X,1));
+X_train = X(rand_num(1:round(0.8*length(rand_num))),:);
+y_train = Y(rand_num(1:round(0.8*length(rand_num))));
 
-%% Cross-Validation Partition
-y_train = y_train(:); % Ensure column vector
-y_test = y_test(:);
-c = cvpartition(y_train, 'k', 5);
+X_test = X(rand_num(round(0.8*length(rand_num))+1:end),:);
+y_test = Y(rand_num(round(0.8*length(rand_num))+1:end));
+%% CV partition
+y_train = y_train';
+y_test = y_test';
+c = cvpartition(y_train,'k',5);
+%% feature selection
 
-%% Feature Selection
-opts = statset('display', 'iter');
-classf = @(train_data, train_labels, test_data, test_labels) ...
-    sum(predict(fitcsvm(train_data, train_labels, 'KernelFunction', 'rbf'), test_data) ~= test_labels);
+opts = statset('display','iter');
+classf = @(train_data, train_labels, test_data, test_labels)...
+    sum(predict(fitcsvm(train_data, train_labels,'KernelFunction','rbf'), test_data) ~= test_labels);
 
-[fs, history] = sequentialfs(classf, X_train, y_train, 'cv', c, 'options', opts, 'nfeatures', 4);
+[fs, history] = sequentialfs(classf, X_train, y_train, 'cv', c, 'options', opts,'nfeatures',4);
+%% Best hyperparameter
 
-%% Train SVM with Optimized Hyperparameters
-X_train_w_best_feature = X_train(:, fs);
+X_train_w_best_feature = X_train(:,fs);
 
-Md1 = fitcsvm(X_train_w_best_feature, y_train, 'KernelFunction', 'linear', ...
-    'OptimizeHyperparameters', 'auto', ...
-    'HyperparameterOptimizationOptions', struct('AcquisitionFunctionName', ...
-    'expected-improvement-plus', 'ShowPlots', true));
+Md1 = fitcsvm(X_train_w_best_feature,y_train,'KernelFunction','linear','OptimizeHyperparameters','auto',...
+      'HyperparameterOptimizationOptions',struct('AcquisitionFunctionName',...
+      'expected-improvement-plus','ShowPlots',true)); % Bayes' Optimization 사용.
 
-%% Evaluate Final Test Set Accuracy
-X_test_w_best_feature = X_test(:, fs);
-test_accuracy_for_iter = sum((predict(Md1, X_test_w_best_feature) == y_test)) / length(y_test) * 100;
 
-%% Display Results
-fprintf('Test accuracy: %.2f%%\n', test_accuracy_for_iter);
+%% Final test with test set
+X_test_w_best_feature = X_test(:,fs);
+test_accuracy_for_iter = sum((predict(Md1,X_test_w_best_feature) == y_test))/length(y_test)*100
 
+%% hyperplane 확인
+
+figure;
+hgscatter = gscatter(X_train_w_best_feature(:,3),X_train_w_best_feature(:,4),y_train);
+hold on;
+h_sv=plot(Md1.SupportVectors(:,1),Md1.SupportVectors(:,2),'ko','markersize',8);
+
+
+% test set의 data를 하나 하나씩 넣어보자.
+
+gscatter(X_test_w_best_feature(:,1),X_test_w_best_feature(:,2),y_test,'rb','xx')
+
+% decision plane
+XLIMs = get(gca,'xlim');
+YLIMs = get(gca,'ylim');
+[xi,yi] = meshgrid([XLIMs(1):1000000:XLIMs(2)],[YLIMs(1):1000000:YLIMs(2)]);
+dd = [xi(:), yi(:)];
+pred_mesh = predict(Md1, dd);
+redcolor = [1, 0.8, 0.8];
+bluecolor = [0.8, 0.8, 1];
+pos = find(pred_mesh == 1);
+h1 = plot(dd(pos,1), dd(pos,2),'s','color',redcolor,'Markersize',5,'MarkerEdgeColor',redcolor,'MarkerFaceColor',redcolor);
+pos = find(pred_mesh == 2);
+h2 = plot(dd(pos,1), dd(pos,2),'s','color',bluecolor,'Markersize',5,'MarkerEdgeColor',bluecolor,'MarkerFaceColor',bluecolor);
+uistack(h1,'bottom');
+uistack(h2,'bottom');
+legend([hgscatter;h_sv],{'setosa','versicolor','support vectors'})
