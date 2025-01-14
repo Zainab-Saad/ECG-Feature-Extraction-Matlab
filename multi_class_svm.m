@@ -1,60 +1,45 @@
-display('Reading samples ECG signal from MIT-BIH Arrhythmia Database')
-[ecg,Fs,tm]=rdsamp('mitdbase/207',1);
+display('Reading samples ECG signal from MIT-BIH Arrhythmia Database');
+[ecg, Fs, tm] = rdsamp('mitdbase/106', 1);
 
-display(['Reading and plotting annotations (human labels) of QRS complexes performend on the signals'])
-[ann,type,subtype,chan,num,comments] =rdann('mitdbase/207','atr',1);
+display(['Reading and plotting annotations (human labels) of QRS complexes performed on the signals']);
+[ann, type, subtype, chan, num, comments] = rdann('mitdbase/106', 'atr', 1);
 
+%% PREPROCESSING
+[R_peaks_val, R_peaks_ind, Q_peaks_ind, Q_peaks_val, ...
+ S_peaks_ind, S_peaks_val, T_peaks_ind, T_peaks_val, delay] = pan_tompkin(ecg, Fs);
 
-
-%% Adding loop
-folder = "mitdbase/";
-fileList = dir(fullfile(folder, '*.hea'));
-fileList = {fileList.name};
-for file_name = fileList
-    recordname = cell2mat(folder + cell2mat(file_name));
-    recordname = recordname(1:end-4);
-    display('Reading samples ECG signal from MIT-BIH Arrhythmia Database Sample Number:')
-    display(recordname)
-    [ecg,Fs,tm]=rdsamp(recordname,1);
-    [ann,type,subtype,chan,num]=rdann(recordname,'atr',1);
-% PRE PROCESSING
-[R_peaks_val, R_peaks_ind,Q_peaks_ind, Q_peaks_val,S_peaks_ind, S_peaks_val,T_peaks_ind, T_peaks_val, delay] = pan_tompkin(ecg, Fs);
-
-% RR_int
+% RR Interval Calculation
 count = 1;
 RR_int = [];
 for i = R_peaks_ind
-    count = count +1;
-    if count >2
-        RR_int = [RR_int , (i-temp_i)/Fs];
+    count = count + 1;
+    if count > 2
+        RR_int = [RR_int, (i - temp_i) / Fs];
     end
     temp_i = i;
-
 end
-% Calculating QS interval
-i =1 ;
+
+% QS Interval Calculation
+i = 1;
 QS_int = [];
 while i < length(S_peaks_ind)
-    QS_int = [QS_int (S_peaks_ind(i)-Q_peaks_ind(i))/Fs];
-    i = i+1;
+    QS_int = [QS_int, (S_peaks_ind(i) - Q_peaks_ind(i)) / Fs];
+    i = i + 1;
 end
 
-
-% Using Comments
-comments2 = comments;
-count =1;
-my_classes = ['N' , 'VFL'];
+% Adjust Comments for Rhythm Identification
+count = 1;
+my_classes = {'N', 'VFL', 'VT'}; % Now includes VT
 rhythm = comments(count);
-while count<length(ann)
+while count < length(ann)
     if (type(count) == '+')
         rhythm = comments(count);
     end
     comments(count) = rhythm;
-
-    count = count +1;
+    count = count + 1;
 end
 
-% Initialize the main data structure to hold arrhythmia features
+%% Rhythm Segmentation and Feature Extraction
 arrhythmiaData = struct();
 
 count = 1;
@@ -62,19 +47,18 @@ while count <= length(comments)
     rhythm = cell2mat(comments(count));
     
     % Identify the rhythm type
-    if (length(rhythm) == 4) && all(rhythm == '(VFL')
+    if length(rhythm) == 4 && all(rhythm == '(VFL')
         rhythmType = 'VFL';
-    elseif (length(rhythm) == 2) && all(rhythm == '(N')
+    elseif length(rhythm) == 2 && all(rhythm == '(N')
         rhythmType = 'N';
-    elseif (length(rhythm) == 3) && all(rhythm == '(VT')
+    elseif length(rhythm) == 3 && all(rhythm == '(VT') % New class VT
         rhythmType = 'VT';
-
     else
         count = count + 1; % Skip unrecognized rhythms
         continue;
     end
     
-    % If rhythmType doesn't exist in arrhythmiaData, initialize it
+    % Initialize fields if rhythmType doesn't exist
     if ~isfield(arrhythmiaData, rhythmType)
         arrhythmiaData.(rhythmType).R_peak_ind = [];
         arrhythmiaData.(rhythmType).Q_peak_ind = [];
@@ -82,14 +66,14 @@ while count <= length(comments)
         arrhythmiaData.(rhythmType).S_peak_ind = [];
     end
     
-    % Find the start and end of the current rhythm section
+    % Find start and end of the rhythm section
     start_count = ann(count);
     while (count <= length(comments)) && ...
           (length(cell2mat(comments(count))) == length(rhythm)) && ...
           all(cell2mat(comments(count)) == rhythm)
         count = count + 1;
     end
-    end_count = ann(count); % Mark the end of the section
+    end_count = ann(count);
     
     % Update peak indices for the current rhythm
     arrhythmiaData.(rhythmType).R_peak_ind = [arrhythmiaData.(rhythmType).R_peak_ind, ...
@@ -111,9 +95,7 @@ for i = 1:length(rhythms)
                                                  arrhythmiaData.(rhythmType).S_peak_ind, Fs);
 end
 
-%% Trying Structured SVM ====================================
 %% Prepare Features and Labels
-% Collect features dynamically from `arrhythmiaData`
 rhythmTypes = fieldnames(arrhythmiaData);
 featureNames = {'R_peak_ind', 'Q_peak_ind', 'S_peak_ind', 'T_peak_ind', 'RR_int', 'QS_int'};
 X = [];
@@ -136,7 +118,6 @@ for i = 1:length(rhythmTypes)
     for j = 1:length(featureNames)
         feature = rhythmData.(featureNames{j});
         if ~isempty(feature)
-            % Resize feature vector to match `numObservations` if necessary
             tempX(:, j) = feature(:);
         end
     end
@@ -147,7 +128,6 @@ for i = 1:length(rhythmTypes)
 end
 
 %% Split Data into Training and Testing Sets
-% Randomize data order
 rand_num = randperm(size(X, 1));
 X = X(rand_num, :);
 Y = Y(rand_num);
@@ -162,32 +142,48 @@ y_train = Y(trainIdx);
 X_test = X(testIdx, :);
 y_test = Y(testIdx);
 
-%% Cross-Validation Partition
-y_train = y_train(:); % Ensure column vector
-y_test = y_test(:);
-c = cvpartition(y_train, 'k', 5);
 
-%% Feature Selection
-opts = statset('display', 'iter');
-classf = @(train_data, train_labels, test_data, test_labels) ...
-    sum(predict(fitcsvm(train_data, train_labels, 'KernelFunction', 'rbf'), test_data) ~= test_labels);
+%% One-vs-All Multiclass Classification
 
-[fs, history] = sequentialfs(classf, X_train, y_train, 'cv', c, 'options', opts, 'nfeatures', 4);
+% Unique classes in the labels
+unique_classes = unique(Y);
+num_classes = length(unique_classes);
 
-%% Train SVM with Optimized Hyperparameters
-X_train_w_best_feature = X_train(:, fs);
+% Initialize models and predictions
+models = cell(num_classes, 1);
+binary_predictions = zeros(length(Y), num_classes);
 
-Md1 = fitcsvm(X_train_w_best_feature, y_train, 'KernelFunction', 'linear', ...
-    'OptimizeHyperparameters', 'auto', ...
-    'HyperparameterOptimizationOptions', struct('AcquisitionFunctionName', ...
-    'expected-improvement-plus', 'ShowPlots', true));
-
-%% Evaluate Final Test Set Accuracy
-X_test_w_best_feature = X_test(:, fs);
-test_accuracy_for_iter = sum((predict(Md1, X_test_w_best_feature) == y_test)) / length(y_test) * 100;
-
-%% Display Results
-fprintf('Test accuracy: %.2f%%\n', test_accuracy_for_iter);
-
-
+% Train a binary SVM for each class
+for i = 1:num_classes
+    fprintf('Training binary SVM for class %d vs all...\n', unique_classes(i));
+    
+    % Create binary labels: 1 for current class, -1 for all others
+    binary_labels = -ones(size(Y));
+    binary_labels(Y == unique_classes(i)) = 1;
+    
+    % Train SVM for the current class
+    models{i} = fitcsvm(X_train, binary_labels(trainIdx), ...
+        'KernelFunction', 'linear', ...
+        'ClassNames', [-1, 1], ...
+        'BoxConstraint', 1, ...
+        'Standardize', true);
 end
+
+%% Testing and One-vs-All Prediction
+binary_predictions = zeros(size(X_test, 1), num_classes); % Preallocate
+
+for i = 1:num_classes
+    % Predict scores for each class
+    [~, scores] = predict(models{i}, X_test);
+
+    % Assign only the positive class score
+    binary_predictions(:, i) = scores(:, 2);
+end
+
+% Assign the class with the highest score as the prediction
+[~, predicted_labels] = max(binary_predictions, [], 2);
+
+%% Evaluate Performance
+test_accuracy = sum(predicted_labels == Y(testIdx)) / length(Y(testIdx)) * 100;
+
+fprintf('Test accuracy (One-vs-All): %.2f%%\n', test_accuracy);
