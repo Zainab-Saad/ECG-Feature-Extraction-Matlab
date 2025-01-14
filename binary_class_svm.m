@@ -43,7 +43,6 @@ end
 % Using Comments
 comments2 = comments;
 count =1;
-my_classes = ['N' , 'VFL'];
 rhythm = comments(count);
 while count<length(ann)
     if (type(count) == '+')
@@ -62,13 +61,16 @@ while count <= length(comments)
     rhythm = cell2mat(comments(count));
     
     % Identify the rhythm type
-    if (length(rhythm) == 4) && all(rhythm == '(VFL')
+    if length(rhythm) == 4 && all(rhythm == '(VFL')
         rhythmType = 'VFL';
-    elseif (length(rhythm) == 2) && all(rhythm == '(N')
+    elseif length(rhythm) == 2 && all(rhythm == '(N')
         rhythmType = 'N';
-    elseif (length(rhythm) == 3) && all(rhythm == '(VT')
+    elseif length(rhythm) == 3 && all(rhythm == '(VT') % New class VT
         rhythmType = 'VT';
-
+    elseif length(rhythm) == 5 && all(rhythm == '(AFIB') % New class VT
+        rhythmType = 'AFIB';
+    elseif length(rhythm) == 4 && all(rhythm == '(BII') % New class VT
+        rhythmType = 'AFIB';
     else
         count = count + 1; % Skip unrecognized rhythms
         continue;

@@ -1,8 +1,8 @@
 display('Reading samples ECG signal from MIT-BIH Arrhythmia Database');
-[ecg, Fs, tm] = rdsamp('mitdbase/205', 1);
+[ecg, Fs, tm] = rdsamp('mitdbase/106', 1);
 
 display(['Reading and plotting annotations (human labels) of QRS complexes performed on the signals']);
-[ann, type, subtype, chan, num, comments] = rdann('mitdbase/205', 'atr', 1);
+[ann, type, subtype, chan, num, comments] = rdann('mitdbase/106', 'atr', 1);
 
 %% PREPROCESSING
 [R_peaks_val, R_peaks_ind, Q_peaks_ind, Q_peaks_val, ...
@@ -11,7 +11,7 @@ display(['Reading and plotting annotations (human labels) of QRS complexes perfo
 
 % Adjust Comments for Rhythm Identification
 count = 1;
-my_classes = {'N', 'VFL', 'VT', 'AFIB'};
+my_classes = {'N', 'VFL', 'VT'}; % Now includes VT
 rhythm = comments(count);
 while count < length(ann)
     if (type(count) == '+')
@@ -35,10 +35,6 @@ while count <= length(comments)
         rhythmType = 'N';
     elseif length(rhythm) == 3 && all(rhythm == '(VT') % New class VT
         rhythmType = 'VT';
-    elseif length(rhythm) == 5 && all(rhythm == '(AFIB') % New class VT
-        rhythmType = 'AFIB';
-    elseif length(rhythm) == 4 && all(rhythm == '(BII') % New class VT
-        rhythmType = 'AFIB';
     else
         count = count + 1; % Skip unrecognized rhythms
         continue;
@@ -46,12 +42,9 @@ while count <= length(comments)
     
     % Initialize fields if rhythmType doesn't exist
     if ~isfield(arrhythmiaData, rhythmType)
-        arrhythmiaData.(rhythmType).R_peak_vals = [];
         arrhythmiaData.(rhythmType).R_peak_ind = [];
-        arrhythmiaData.(rhythmType).Q_peak_vals = [];
         arrhythmiaData.(rhythmType).Q_peak_ind = [];
-        arrhythmiaData.(rhythmType).T_peak_vals = [];
-        arrhythmiaData.(rhythmType).S_peak_vals = [];
+        arrhythmiaData.(rhythmType).T_peak_ind = [];
         arrhythmiaData.(rhythmType).S_peak_ind = [];
     end
     
@@ -65,23 +58,12 @@ while count <= length(comments)
     end_count = ann(count);
     
     % Update peak indices for the current rhythm
-    arrhythmiaData.(rhythmType).R_peak_vals = [arrhythmiaData.(rhythmType).R_peak_vals, ...
-        ecg(R_peaks_ind((R_peaks_ind > start_count) & (R_peaks_ind < end_count)))'];
-    
     arrhythmiaData.(rhythmType).R_peak_ind = [arrhythmiaData.(rhythmType).R_peak_ind, ...
         R_peaks_ind((R_peaks_ind > start_count) & (R_peaks_ind < end_count))];
-                
-    arrhythmiaData.(rhythmType).Q_peak_vals = [arrhythmiaData.(rhythmType).Q_peak_vals, ...
-        ecg(Q_peaks_ind((Q_peaks_ind > start_count) & (Q_peaks_ind < end_count)))'];
-
     arrhythmiaData.(rhythmType).Q_peak_ind = [arrhythmiaData.(rhythmType).Q_peak_ind, ...
         Q_peaks_ind((Q_peaks_ind > start_count) & (Q_peaks_ind < end_count))];
-        
-    arrhythmiaData.(rhythmType).T_peak_vals = [arrhythmiaData.(rhythmType).T_peak_vals, ...
-        ecg(T_peaks_ind((T_peaks_ind > start_count) & (T_peaks_ind < end_count)))'];
-
-    arrhythmiaData.(rhythmType).S_peak_vals = [arrhythmiaData.(rhythmType).S_peak_vals, ...
-        ecg(S_peaks_ind((S_peaks_ind > start_count) & (S_peaks_ind < end_count)))'];
+    arrhythmiaData.(rhythmType).T_peak_ind = [arrhythmiaData.(rhythmType).T_peak_ind, ...
+        T_peaks_ind((T_peaks_ind > start_count) & (T_peaks_ind < end_count))];
     arrhythmiaData.(rhythmType).S_peak_ind = [arrhythmiaData.(rhythmType).S_peak_ind, ...
         S_peaks_ind((S_peaks_ind > start_count) & (S_peaks_ind < end_count))];
 end
@@ -90,16 +72,6 @@ end
 rhythms = fieldnames(arrhythmiaData);
 for i = 1:length(rhythms)
     rhythmType = rhythms{i};
-    obs = min([length(arrhythmiaData.(rhythmType).R_peak_vals),length(arrhythmiaData.(rhythmType).Q_peak_vals),length(arrhythmiaData.(rhythmType).S_peak_vals),length(arrhythmiaData.(rhythmType).T_peak_vals)]);
-        arrhythmiaData.(rhythmType).R_peak_vals = arrhythmiaData.(rhythmType).R_peak_vals(1:obs);
-        arrhythmiaData.(rhythmType).R_peak_ind = arrhythmiaData.(rhythmType).R_peak_ind(1:obs);
-        arrhythmiaData.(rhythmType).Q_peak_vals = arrhythmiaData.(rhythmType).Q_peak_vals(1:obs);
-        arrhythmiaData.(rhythmType).S_peak_vals = arrhythmiaData.(rhythmType).S_peak_vals(1:obs);
-        arrhythmiaData.(rhythmType).Q_peak_ind = arrhythmiaData.(rhythmType).Q_peak_ind(1:obs);
-        arrhythmiaData.(rhythmType).S_peak_ind = arrhythmiaData.(rhythmType).S_peak_ind(1:obs);
-        arrhythmiaData.(rhythmType).T_peak_vals = arrhythmiaData.(rhythmType).T_peak_vals(1:obs);
-        
-
     arrhythmiaData.(rhythmType).RR_int = calc_rr(arrhythmiaData.(rhythmType).R_peak_ind, Fs);
     arrhythmiaData.(rhythmType).QS_int = calc_qs(arrhythmiaData.(rhythmType).Q_peak_ind, ...
                                                  arrhythmiaData.(rhythmType).S_peak_ind, Fs);
@@ -107,7 +79,7 @@ end
 
 %% Prepare Features and Labels
 rhythmTypes = fieldnames(arrhythmiaData);
-featureNames = {'R_peak_vals', 'Q_peak_vals', 'S_peak_vals', 'T_peak_vals', 'RR_int', 'QS_int'};
+featureNames = {'R_peak_ind', 'Q_peak_ind', 'S_peak_ind', 'T_peak_ind', 'RR_int', 'QS_int'};
 X = [];
 Y = [];
 
@@ -120,7 +92,7 @@ for i = 1:length(rhythmTypes)
     
     % Extract features for the current rhythm
     rhythmData = arrhythmiaData.(rhythmType);
-    numObservations = length(rhythmData.Q_peak_vals); % Assuming R_peak_ind determines observation count
+    numObservations = length(rhythmData.R_peak_ind); % Assuming R_peak_ind determines observation count
     
     % Initialize a temporary feature matrix
     tempX = zeros(numObservations, length(featureNames));
