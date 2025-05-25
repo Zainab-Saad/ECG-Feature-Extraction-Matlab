@@ -104,6 +104,7 @@ for i = 1:length(fileList)
 
     arrhythmiaData.(rhythmType).S_peak_vals = [arrhythmiaData.(rhythmType).S_peak_vals, ...
         ecg(S_peaks_ind((S_peaks_ind > start_count) & (S_peaks_ind < end_count)))'];
+
     arrhythmiaData.(rhythmType).S_peak_ind = [arrhythmiaData.(rhythmType).S_peak_ind, ...
         S_peaks_ind((S_peaks_ind > start_count) & (S_peaks_ind < end_count))];
 end
@@ -120,10 +121,8 @@ for i = 1:length(rhythms)
         arrhythmiaData.(rhythmType).Q_peak_ind = arrhythmiaData.(rhythmType).Q_peak_ind(1:obs);
         arrhythmiaData.(rhythmType).S_peak_ind = arrhythmiaData.(rhythmType).S_peak_ind(1:obs);
         arrhythmiaData.(rhythmType).T_peak_vals = arrhythmiaData.(rhythmType).T_peak_vals(1:obs);
-        
-
-    arrhythmiaData.(rhythmType).RR_int = calc_rr(arrhythmiaData.(rhythmType).R_peak_ind, Fs);
-    arrhythmiaData.(rhythmType).QS_int = calc_qs(arrhythmiaData.(rhythmType).Q_peak_ind, ...
+        arrhythmiaData.(rhythmType).RR_int = calc_rr(arrhythmiaData.(rhythmType).R_peak_ind, Fs);
+        arrhythmiaData.(rhythmType).QS_int = calc_qs(arrhythmiaData.(rhythmType).Q_peak_ind, ...
                                                  arrhythmiaData.(rhythmType).S_peak_ind, Fs);
 end
 
@@ -179,6 +178,55 @@ y_train = Y(trainIdx);
 
 X_test = X(testIdx, :);
 y_test = Y(testIdx);
+
+
+% Get unique classes and find class 1 (assuming class 1 is the target class)
+unique_classes = unique(Y);
+target_class = 3; % We'll use class 1 as our target class
+if ~ismember(target_class, unique_classes)
+    error('Target class 1 not found in the data');
+end
+
+% Create binary labels for AFIB vs all
+binary_labels = -ones(size(Y));
+binary_labels(Y == 3) = 1;
+
+% Split binary labels into train/test
+y_train_binary = binary_labels(trainIdx);
+y_test_binary = binary_labels(testIdx);
+
+% Move data to GPU
+X_train_gpu = gpuArray(X_train);
+y_train_binary_gpu = gpuArray(y_train_binary);
+X_test_gpu = gpuArray(X_test);
+
+% Train binary SVM for AFIB vs all
+fprintf('Training binary SVM for AFIB vs all...\n');
+afib_model = fitcsvm(X_train_gpu, y_train_binary_gpu, ...
+    'KernelFunction', 'linear', ...
+    'ClassNames', [-1, 1], ...
+    'BoxConstraint', 1, ...
+    'Standardize', true);
+
+% Get predictions and scores
+[~, afib_scores] = predict(afib_model, X_test_gpu);
+
+% Move results back to CPU
+afib_scores = gather(afib_scores);
+
+% Calculate accuracy for AFIB classification
+afib_predictions = afib_scores(:, 2) > 0;
+afib_accuracy = sum(afib_predictions == y_test_binary) / length(y_test_binary);
+fprintf('AFIB vs All Classification Accuracy: %.2f%%\n', afib_accuracy * 100);
+
+% Display confusion matrix
+figure;
+confusionchart(y_test_binary, afib_predictions);
+title('AFIB vs All Classification Confusion Matrix');
+
+
+
+
 
 %% =====================================================================
 %% One-vs-All Multiclass Classification
