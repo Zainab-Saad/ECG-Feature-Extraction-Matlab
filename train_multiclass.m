@@ -6,7 +6,7 @@ fileList = {fileList.name};
 all_X = [];
 all_Y = [];
 arrhythmiaData = struct();
-
+total_len=0;
 % Iterate over each file
 for i = 1:length(fileList)
     recordname = str2mat(fullfile(folder, fileList{i}(1:end-4))); % Remove file extension
@@ -132,12 +132,14 @@ featureNames = {'R_peak_vals', 'Q_peak_vals', 'S_peak_vals', 'T_peak_vals', 'RR_
 X = [];
 Y = [];
 
-    labelMapping = containers.Map(rhythmTypes, 1:length(rhythmTypes));
+% Only keep AFIB and NORMAL classes
+validRhythms = {'AFIB', 'N'};
+X = [];
+Y = [];
 
-    for i = 1:length(rhythmTypes)
-        rhythmType = rhythmTypes{i};
-        label = labelMapping(rhythmType);
-
+for i = 1:length(validRhythms)
+    rhythmType = validRhythms{i};
+    if isfield(arrhythmiaData, rhythmType)
         % Extract features
         rhythmData = arrhythmiaData.(rhythmType);
         numObservations = length(rhythmData.R_peak_ind);
@@ -154,147 +156,189 @@ Y = [];
 
         % Append the features and labels
         X = [X; tempX]; % Append features
-        Y = [Y; label * ones(numObservations, 1)]; % Append labels
+        % Use 1 for AFIB, 0 for NORMAL
+        if strcmp(rhythmType, 'AFIB')
+            Y = [Y; ones(numObservations, 1)];
+        else
+            Y = [Y; zeros(numObservations, 1)];
+        end
     end
-
-    %% Collect all features and labels from all files
-    all_X = [all_X; X]; 
-    all_Y = [all_Y; Y]; 
 end
 
-
-%% Split Data into Training and Testing Sets
-
+all_X = [all_X; X]; 
+all_Y = [all_Y; Y]; 
+end
+%%
 X = all_X;
 Y = all_Y;
 
-% Get unique classes and find class 1 (assuming class 1 is the target class)
-unique_classes = unique(Y);
-target_class = 3; % We'll use class 1 as our target class
-if ~ismember(target_class, unique_classes)
-    % If the target class (AFIB) is not found in the *entire* dataset after
-    % filtering databases, you might have removed the source of AFIB data.
-    error('Target class %d (AFIB) not found in the combined data.', target_class);
+% Print dataset statistics
+fprintf('\nDataset Statistics:\n');
+fprintf('Total samples: %d\n', length(Y));
+fprintf('AFIB samples: %d (%.2f%%)\n', sum(Y==1), 100*sum(Y==1)/length(Y));
+fprintf('NORMAL samples: %d (%.2f%%)\n', sum(Y==0), 100*sum(Y==0)/length(Y));
+
+% Check for feature correlations
+fprintf('\nFeature Correlations:\n');
+correlation_matrix = corrcoef(X);
+feature_names = {'R_peak_vals', 'Q_peak_vals', 'S_peak_vals', 'T_peak_vals', 'RR_int', 'QS_int'};
+for i = 1:length(feature_names)
+    for j = i+1:length(feature_names)
+        fprintf('Correlation between %s and %s: %.4f\n', ...
+            feature_names{i}, feature_names{j}, correlation_matrix(i,j));
+    end
 end
 
-% Create binary labels for AFIB vs all for the *entire* dataset
-binary_labels = -ones(size(Y));
-binary_labels(Y == target_class) = 1; % Assign 1 to the target class (AFIB)
+% Initialize performance metrics storage
+num_folds = 5;
+fold_accuracies = zeros(num_folds, 1);
+fold_precisions = zeros(num_folds, 1);
+fold_recalls = zeros(num_folds, 1);
+fold_f1_scores = zeros(num_folds, 1);
+fold_aucs = zeros(num_folds, 1);
 
-%% Use Stratified Random Split to ensure class distribution is similar in train and test
-fprintf('Performing stratified random split...\n');
-% Create a partition object. 80% for training, stratified by the binary labels.
-% Use the binary labels to ensure AFIB and Not AFIB are represented in both sets.
-cvp = cvpartition(binary_labels, 'Holdout', 0.2, 'Stratify', true); % 20% for test
+% Create k-fold cross-validation partition with stratification
+cv = cvpartition(Y, 'KFold', num_folds, 'Stratify', true);
 
-% Get the training and testing indices from the partition
-trainIdx = training(cvp); % Logical indices for training
-testIdx = test(cvp);     % Logical indices for testing
+fprintf('\nStarting %d-fold cross-validation...\n', num_folds);
 
-% Create the training and testing datasets using the logical indices
-X_train = X(trainIdx, :);
-y_train = Y(trainIdx); % Keep original multiclass labels for train if needed elsewhere
-binary_labels_train = binary_labels(trainIdx); % Binary labels for training
-
-X_test = X(testIdx, :);
-y_test = Y(testIdx); % Keep original multiclass labels for test if needed elsewhere
-binary_labels_test = binary_labels(testIdx); % Binary labels for testing
-
-% Assign the binary labels to the variables used later
-y_train_binary = binary_labels_train;
-y_test_binary = binary_labels_test;
-
-fprintf('Data split completed. Training samples: %d, Testing samples: %d\n', sum(trainIdx), sum(testIdx));
-fprintf('Training set distribution: AFIB (%d): %d samples, Not AFIB (%d): %d samples\n', ...
-        target_class, sum(y_train_binary == 1), -1, sum(y_train_binary == -1));
-fprintf('Testing set distribution: AFIB (%d): %d samples, Not AFIB (%d): %d samples\n', ...
-        target_class, sum(y_test_binary == 1), -1, sum(y_test_binary == -1));
-
-
-%% Implement Undersampling with a Ratio
-fprintf('Implementing undersampling with a ratio on the training data...\n');
-
-% Find indices of minority class (AFIB, label 1) in the training data
-minority_class_label = 1; % AFIB is labeled 1 in binary_labels
-minority_indices = find(y_train_binary == minority_class_label);
-num_minority_samples = length(minority_indices);
-
-% Find indices of majority class (Not AFIB, label -1) in the training data
-majority_class_label = -1; % Not AFIB is labeled -1 in binary_labels
-majority_indices = find(y_train_binary == majority_class_label);
-num_majority_samples = length(majority_indices);
-
-fprintf('Training data before undersampling: Minority (%d): %d samples, Majority (%d): %d samples\n', ...
-        minority_class_label, num_minority_samples, majority_class_label, num_majority_samples);
-
-% Define the ratio of Majority to Minority samples in the undersampled training set
-% E.g., 1 means 1:1 ratio (Majority count = Minority count)
-% E.g., 2 means 1:2 ratio (Majority count = 2 * Minority count)
-% Adjust this value based on desired training set size and performance
-undersampling_ratio_majority_to_minority = 2; % <<< Start with a ratio (e.g., 2) and adjust
-
-num_majority_to_select = round(num_minority_samples * undersampling_ratio_majority_to_minority);
-
-% Ensure we don't select more majority samples than available
-if num_majority_to_select > num_majority_samples
-    warning('Cannot select %d majority samples for ratio %d, only %d available. Selecting all majority samples.', num_majority_to_select, undersampling_ratio_majority_to_minority, num_majority_samples);
-    num_majority_to_select = num_majority_samples;
+% Perform k-fold cross-validation
+for fold = 1:num_folds
+    fprintf('\nFold %d/%d:\n', fold, num_folds);
+    
+    % Get training and test indices for this fold
+    train_idx = training(cv, fold);
+    test_idx = test(cv, fold);
+    
+    % Split data
+    X_train = X(train_idx, :);
+    y_train = Y(train_idx);
+    X_test = X(test_idx, :);
+    y_test = Y(test_idx);
+    
+    % Print fold statistics
+    fprintf('Fold %d - Training set: %d samples (%d AFIB, %d NORMAL)\n', ...
+        fold, length(y_train), sum(y_train==1), sum(y_train==0));
+    fprintf('Fold %d - Test set: %d samples (%d AFIB, %d NORMAL)\n', ...
+        fold, length(y_test), sum(y_test==1), sum(y_test==0));
+    
+    % Move training data to GPU
+    X_train_gpu = gpuArray(single(X_train));
+    y_train_gpu = gpuArray(single(y_train));
+    
+    % Calculate class weights to handle imbalance
+    num_afib = sum(y_train == 1);
+    num_normal = sum(y_train == 0);
+    class_weights = zeros(size(y_train));
+    class_weights(y_train == 1) = num_normal/num_afib;  % Weight for AFIB class
+    class_weights(y_train == 0) = 1;                   % Weight for Normal class
+    class_weights_gpu = gpuArray(single(class_weights));
+    
+    % Train SVM on GPU
+    svm_model = fitcsvm(X_train_gpu, y_train_gpu, ...
+        'KernelFunction', 'rbf', ...
+        'ClassNames', [0, 1], ...
+        'BoxConstraint', 10, ...
+        'KernelScale', 'auto', ...
+        'Standardize', true, ...
+        'Weights', class_weights_gpu);
+    
+    % Process test data in batches
+    batch_size = 1000;  % Adjust this based on your GPU memory
+    num_test_samples = size(X_test, 1);
+    num_batches = ceil(num_test_samples / batch_size);
+    
+    % Initialize arrays for predictions and scores
+    y_pred = zeros(num_test_samples, 1);
+    scores = zeros(num_test_samples, 2);
+    
+    fprintf('Processing test data in %d batches...\n', num_batches);
+    
+    % Process each batch
+    for batch = 1:num_batches
+        % Calculate batch indices
+        start_idx = (batch-1) * batch_size + 1;
+        end_idx = min(batch * batch_size, num_test_samples);
+        
+        % Get current batch
+        X_test_batch = X_test(start_idx:end_idx, :);
+        
+        % Move batch to GPU
+        X_test_gpu = gpuArray(single(X_test_batch));
+        
+        % Get predictions for batch
+        [y_pred_batch_gpu, scores_batch_gpu] = predict(svm_model, X_test_gpu);
+        
+        % Move predictions back to CPU
+        y_pred(start_idx:end_idx) = gather(y_pred_batch_gpu);
+        scores(start_idx:end_idx, :) = gather(scores_batch_gpu);
+        
+        % Clear GPU memory
+        clear X_test_gpu y_pred_batch_gpu scores_batch_gpu;
+        
+        % Print progress
+        fprintf('Processed batch %d/%d\n', batch, num_batches);
+    end
+    
+    % Calculate metrics
+    TP = sum(y_pred == 1 & y_test == 1);
+    TN = sum(y_pred == 0 & y_test == 0);
+    FP = sum(y_pred == 1 & y_test == 0);
+    FN = sum(y_pred == 0 & y_test == 1);
+    
+    accuracy = (TP + TN) / (TP + TN + FP + FN);
+    precision = TP / (TP + FP + eps);
+    recall = TP / (TP + FN + eps);
+    f1_score = 2 * (precision * recall) / (precision + recall + eps);
+    
+    % Calculate AUC
+    [~,~,~,AUC] = perfcurve(y_test, scores(:,2), 1);
+    
+    % Store metrics
+    fold_accuracies(fold) = accuracy;
+    fold_precisions(fold) = precision;
+    fold_recalls(fold) = recall;
+    fold_f1_scores(fold) = f1_score;
+    fold_aucs(fold) = AUC;
+    
+    % Print fold results
+    fprintf('Fold %d Results:\n', fold);
+    fprintf('Accuracy: %.2f%%\n', accuracy * 100);
+    fprintf('Precision: %.4f\n', precision);
+    fprintf('Recall: %.4f\n', recall);
+    fprintf('F1 Score: %.4f\n', f1_score);
+    fprintf('AUC: %.4f\n', AUC);
+    
+    % Plot confusion matrix for this fold
+    figure;
+    confusionchart(y_test, y_pred);
+    title(sprintf('Confusion Matrix - Fold %d', fold));
+    
+    % Plot ROC curve for this fold
+    figure;
+    [X_roc,Y_roc,~,~] = perfcurve(y_test, scores(:,2), 1);
+    plot(X_roc,Y_roc);
+    xlabel('False Positive Rate');
+    ylabel('True Positive Rate');
+    title(sprintf('ROC Curve - Fold %d (AUC = %.3f)', fold, AUC));
+    grid on;
+    
+    % Clear GPU memory after each fold
+    clear X_train_gpu y_train_gpu class_weights_gpu;
 end
 
-% Randomly select majority samples WITHOUT replacement
-% Use randperm to get unique random indices
-selected_majority_indices = majority_indices(randperm(num_majority_samples, num_majority_to_select));
+% Print overall results
+fprintf('\nOverall Cross-Validation Results:\n');
+fprintf('Mean Accuracy: %.2f%% ± %.2f%%\n', mean(fold_accuracies)*100, std(fold_accuracies)*100);
+fprintf('Mean Precision: %.4f ± %.4f\n', mean(fold_precisions), std(fold_precisions));
+fprintf('Mean Recall: %.4f ± %.4f\n', mean(fold_recalls), std(fold_recalls));
+fprintf('Mean F1 Score: %.4f ± %.4f\n', mean(fold_f1_scores), std(fold_f1_scores));
+fprintf('Mean AUC: %.4f ± %.4f\n', mean(fold_aucs), std(fold_aucs));
 
-% Combine the indices of the minority samples and the selected majority samples
-balanced_train_indices = [minority_indices; selected_majority_indices];
-
-% Shuffle the balanced indices to mix the classes
-balanced_train_indices = balanced_train_indices(randperm(length(balanced_train_indices)));
-
-% Create the undersampled training dataset
-X_train_undersampled = X_train(balanced_train_indices, :);
-y_train_binary_undersampled = y_train_binary(balanced_train_indices); % Use binary labels
-
-
-fprintf('Training data after undersampling (ratio 1:%d): Minority (%d): %d samples, Majority (%d): %d samples\n', ...
-        undersampling_ratio_majority_to_minority, ...
-        minority_class_label, sum(y_train_binary_undersampled == minority_class_label), ...
-        majority_class_label, sum(y_train_binary_undersampled == majority_class_label));
-
-
-% Move undersampled training data and original test data to GPU
-% Ensure data is single precision before moving to GPU
-X_train_gpu = gpuArray(single(X_train_undersampled)); % Use undersampled training data
-y_train_binary_gpu = gpuArray(single(y_train_binary_undersampled)); % Use undersampled binary labels
-X_test_gpu = gpuArray(single(X_test)); % Use original test data
-
-% Calculate class costs for cost matrix based on ORIGINAL TRAINING data IMBALANCE
-% Note: target_class = 3 corresponds to binary label 1
-% We will use the counts from the original y_train_binary before undersampling
-num_afib_train_original = sum(y_train_binary == 1); % Count samples in original training set
-num_not_afib_train_original = sum(y_train_binary == -1); % Count samples in original training set
-
-% Calculate costs: Penalize misclassifying minority (AFIB, 1) as majority (-1)
-% cost_fn is cost of predicting -1 when true is 1 (False Negative)
-% Use counts from the ORIGINAL imbalanced data ratio for a strong penalty
-cost_fn = num_not_afib_train_original / num_afib_train_original; % This will be a high value (~8.17 based on earlier numbers)
-% cost_fp is cost of predicting 1 when true is -1 (False Positive)
-cost_fp = 1; % A common starting point
-
-% Define the Cost matrix for fitcsvm: Cost(i,j) is classifying into i when true is j
-% ClassNames are [-1, 1]
-% Cost matrix structure:
-%           True -1   True 1
-% Pred -1:    0       cost_fn
-% Pred 1: cost_fp       0
-Cost_Matrix = [0, cost_fn; cost_fp, 0];
-
-
-% Train binary SVM for AFIB vs all
-fprintf('Training binary SVM for AFIB vs all using undersampled data and cost-sensitive learning (original ratio cost)...\n');
-afib_model = fitcsvm(X_train_gpu, y_train_binary_gpu, ... % Train on undersampled data
-    'KernelFunction', 'linear', ...
-    'ClassNames', [-1, 1], ...
-    'BoxConstraint', 1, ...
-    'Standardize', true, ...
-    'Cost', Cost_Matrix); % Apply Cost matrix based on original imbalance
+% Plot boxplot of performance metrics
+figure;
+boxplot([fold_accuracies, fold_precisions, fold_recalls, fold_f1_scores, fold_aucs], ...
+    'Labels', {'Accuracy', 'Precision', 'Recall', 'F1 Score', 'AUC'});
+title('Distribution of Performance Metrics Across Folds');
+ylabel('Score');
+grid on;
