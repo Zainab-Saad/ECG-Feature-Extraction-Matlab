@@ -230,16 +230,15 @@ for fold = 1:num_folds
     num_afib = sum(y_train == 1);
     num_normal = sum(y_train == 0);
     class_weights = zeros(size(y_train));
-    class_weights(y_train == 1) = num_normal/num_afib;  % Weight for AFIB class
-    class_weights(y_train == 0) = 1;                   % Weight for Normal class
+    class_weights(y_train == 1) = (num_normal/num_afib) * 1.5;  % Increased weight for AFIB class
+    class_weights(y_train == 0) = 1.2;                         % Slightly increased weight for Normal class
     class_weights_gpu = gpuArray(single(class_weights));
     
     % Train SVM on GPU
     svm_model = fitcsvm(X_train_gpu, y_train_gpu, ...
-        'KernelFunction', 'rbf', ...
+        'KernelFunction', 'linear', ...
         'ClassNames', [0, 1], ...
-        'BoxConstraint', 10, ...
-        'KernelScale', 'auto', ...
+        'BoxConstraint', 5, ...  % Increased from 1 to 5 for harder margin
         'Standardize', true, ...
         'Weights', class_weights_gpu);
     
@@ -342,3 +341,8 @@ boxplot([fold_accuracies, fold_precisions, fold_recalls, fold_f1_scores, fold_au
 title('Distribution of Performance Metrics Across Folds');
 ylabel('Score');
 grid on;
+
+% Save the final trained model and essential variables
+fprintf('\nSaving model and essential variables...\n');
+save('afib_model.mat', 'svm_model', 'featureNames', 'Fs', 'class_weights');
+fprintf('Model saved successfully as afib_model.mat\n');

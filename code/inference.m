@@ -1,3 +1,6 @@
+%% THIS FILE IS UNDER DEVELOPMENT AND MAY NOT WORK AS INTENDED AS OF NOW
+
+
 folder = "databases/";
 fileList = dir(fullfile(folder, '*.hea'));
 fileList = {fileList.name};
