@@ -37,12 +37,54 @@ for i = 1:length(fileList)
     rhythm = comments(1);
     count = 1;
     my_classes = {'N', 'VT'};
-    while count < length(ann)
-        if (type(count) == '+')
-            rhythm = comments(count);
+    
+    % Check if file starts with 'cu'
+    [~, filename, ~] = fileparts(recordname);
+    if startsWith(filename, 'cu')
+        % Use '[' and ']' markers for VT detection
+        vt_start = [];
+        vt_end = [];
+        
+        % Find VT segments using '[' and ']' markers
+        for i = 1:length(type)
+            if type(i) == '['
+                vt_start = [vt_start, ann(i)];
+            elseif type(i) == ']'
+                vt_end = [vt_end, ann(i)];
+            end
         end
-        comments(count) = rhythm;
-        count = count + 1;
+        
+        % Handle cases where some VT segments might not have closing ']'
+        if length(vt_start) > length(vt_end)
+            % Add end of signal as the end point for VT segments without closing ']'
+            remaining_vt = length(vt_start) - length(vt_end);
+            vt_end = [vt_end, repmat(length(ecg), 1, remaining_vt)];
+        end
+        
+        % Mark all segments as Normal by default
+        for i = 1:length(ann)
+            comments{i} = '(N';
+        end
+        
+        % Mark VT segments
+        for i = 1:length(vt_start)
+            start_idx = find(ann >= vt_start(i), 1, 'first');
+            end_idx = find(ann <= vt_end(i), 1, 'last');
+            if ~isempty(start_idx) && ~isempty(end_idx)
+                for j = start_idx:end_idx
+                    comments{j} = '(VT';
+                end
+            end
+        end
+    else
+        % Use original method with comments and types
+        while count < length(ann)
+            if (type(count) == '+')
+                rhythm = comments(count);
+            end
+            comments(count) = rhythm;
+            count = count + 1;
+        end
     end
 
     %% Feature Extraction and Labeling
@@ -84,7 +126,12 @@ for i = 1:length(fileList)
           all(cell2mat(comments(count)) == rhythm)
         count = count + 1;
     end
-    end_count = ann(count);
+    % Handle the case where we've reached the end of annotations
+    if count <= length(ann)
+        end_count = ann(count);
+    else
+        end_count = length(ecg);  % Use the end of ECG signal if we've reached the end of annotations
+    end
     
     % Update peak indices for the current rhythm
     arrhythmiaData.(rhythmType).R_peak_vals = [arrhythmiaData.(rhythmType).R_peak_vals, ...
@@ -153,6 +200,7 @@ for i = 1:length(validRhythms)
                 tempX(:, j) = feature(:);
             end
         end
+
 
         % Append the features and labels
         X = [X; tempX]; % Append features
@@ -238,7 +286,7 @@ for fold = 1:num_folds
     svm_model = fitcsvm(X_train_gpu, y_train_gpu, ...
         'KernelFunction', 'linear', ...
         'ClassNames', [0, 1], ...
-        'BoxConstraint', 5, ...  % Increased from 1 to 5 for harder margin
+        'BoxConstraint', 1, ...  % Increased from 1 to 5 for harder margin
         'Standardize', true, ...
         'Weights', class_weights_gpu);
     
