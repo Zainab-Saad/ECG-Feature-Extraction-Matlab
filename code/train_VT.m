@@ -184,34 +184,51 @@ validRhythms = {'VT', 'N'};
 X = [];
 Y = [];
 
+% Count VT and N samples for balancing
+num_VT = 0;
+num_N = 0;
+VT_X = [];
+VT_Y = [];
+N_X = [];
+N_Y = [];
+
 for i = 1:length(validRhythms)
     rhythmType = validRhythms{i};
     if isfield(arrhythmiaData, rhythmType)
-        % Extract features
         rhythmData = arrhythmiaData.(rhythmType);
         numObservations = length(rhythmData.R_peak_ind);
-
-        % Initialize temporary feature matrix
         tempX = zeros(numObservations, length(featureNames));
-
         for j = 1:length(featureNames)
             feature = rhythmData.(featureNames{j});
             if ~isempty(feature)
                 tempX(:, j) = feature(:);
             end
         end
-
-
-        % Append the features and labels
-        X = [X; tempX]; % Append features
-        % Use 1 for VT, 0 for NORMAL
         if strcmp(rhythmType, 'VT')
-            Y = [Y; ones(numObservations, 1)];
+            VT_X = [VT_X; tempX];
+            VT_Y = [VT_Y; ones(numObservations, 1)];
+            num_VT = num_VT + numObservations;
         else
-            Y = [Y; zeros(numObservations, 1)];
+            N_X = [N_X; tempX];
+            N_Y = [N_Y; zeros(numObservations, 1)];
+            num_N = num_N + numObservations;
         end
     end
 end
+
+% Downsample N to achieve VT:N = 3:2 ratio
+if num_VT > 0 && num_N > 0
+    target_N = round((2/3) * num_VT);
+    if num_N > target_N
+        rand_idx = randperm(num_N, target_N);
+        N_X = N_X(rand_idx, :);
+        N_Y = N_Y(rand_idx, :);
+        num_N = target_N;
+    end
+end
+
+X = [VT_X; N_X];
+Y = [VT_Y; N_Y];
 
 all_X = [all_X; X]; 
 all_Y = [all_Y; Y]; 
@@ -283,7 +300,7 @@ for fold = 1:num_folds
     class_weights_gpu = gpuArray(single(class_weights));
     
     % Train SVM on GPU
-    svm_model = fitcsvm(X_train_gpu, y_train_gpu, ...
+    vt_svm_model = fitcsvm(X_train_gpu, y_train_gpu, ...
         'KernelFunction', 'linear', ...
         'ClassNames', [0, 1], ...
         'BoxConstraint', 1, ...  % Increased from 1 to 5 for harder margin
@@ -314,7 +331,7 @@ for fold = 1:num_folds
         X_test_gpu = gpuArray(single(X_test_batch));
         
         % Get predictions for batch
-        [y_pred_batch_gpu, scores_batch_gpu] = predict(svm_model, X_test_gpu);
+        [y_pred_batch_gpu, scores_batch_gpu] = predict(vt_svm_model, X_test_gpu);
         
         % Move predictions back to CPU
         y_pred(start_idx:end_idx) = gather(y_pred_batch_gpu);
@@ -327,7 +344,9 @@ for fold = 1:num_folds
         fprintf('Processed batch %d/%d\n', batch, num_batches);
     end
     
-    % Calculate metrics
+    % Calculate metrics with custom threshold
+    vt_threshold = 0.3; % Set your custom threshold here
+    y_pred = scores(:,2) > vt_threshold;
     TP = sum(y_pred == 1 & y_test == 1);
     TN = sum(y_pred == 0 & y_test == 0);
     FP = sum(y_pred == 1 & y_test == 0);
@@ -349,7 +368,7 @@ for fold = 1:num_folds
     fold_aucs(fold) = AUC;
     
     % Print fold results
-    fprintf('Fold %d Results:\n', fold);
+    fprintf('Fold %d Results (Threshold=%.2f):\n', fold, vt_threshold);
     fprintf('Accuracy: %.2f%%\n', accuracy * 100);
     fprintf('Precision: %.4f\n', precision);
     fprintf('Recall: %.4f\n', recall);
@@ -358,7 +377,9 @@ for fold = 1:num_folds
     
     % Plot confusion matrix for this fold
     figure;
-    confusionchart(y_test, y_pred);
+    % Ensure y_pred is same type as y_test for confusionchart
+    y_pred_chart = cast(y_pred, 'like', y_test);
+    confusionchart(y_test, y_pred_chart);
     title(sprintf('Confusion Matrix - Fold %d', fold));
     
     % Plot ROC curve for this fold
@@ -389,8 +410,8 @@ boxplot([fold_accuracies, fold_precisions, fold_recalls, fold_f1_scores, fold_au
 title('Distribution of Performance Metrics Across Folds');
 ylabel('Score');
 grid on;
-
+%%
 % Save the final trained model and essential variables
 fprintf('\nSaving model and essential variables...\n');
-save('vt_model.mat', 'svm_model', 'featureNames', 'Fs', 'class_weights');
+save('vt_model.mat', 'vt_svm_model', 'featureNames', 'Fs', 'class_weights');
 fprintf('Model saved successfully as vt_model.mat\n');

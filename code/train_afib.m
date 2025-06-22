@@ -53,8 +53,12 @@ for i = 1:length(fileList)
         % Assign rhythm type
         if  length(rhythm) == 4 && all(rhythm == '(VFL')
             rhythmType = 'VFL';
+        elseif  length(rhythm) == 4 && all(rhythm == '(AFL')
+            rhythmType = 'AFL';
         elseif length(rhythm) == 2 && all(rhythm == '(N')
             rhythmType = 'N';
+        elseif length(rhythm) == 2 && all(rhythm == '(P')
+            rhythmType = 'P';
         elseif length(rhythm) == 3 && all(rhythm == '(VT') % New class VT
             rhythmType = 'VT';
         elseif length(rhythm) == 5 && all(rhythm == '(AFIB') % New class VT
@@ -235,10 +239,10 @@ for fold = 1:num_folds
     class_weights_gpu = gpuArray(single(class_weights));
     
     % Train SVM on GPU
-    svm_model = fitcsvm(X_train_gpu, y_train_gpu, ...
+    afib_svm_model = fitcsvm(X_train_gpu, y_train_gpu, ...
         'KernelFunction', 'linear', ...
         'ClassNames', [0, 1], ...
-        'BoxConstraint', 5, ...  % Increased from 1 to 5 for harder margin
+        'BoxConstraint', 1, ...  % Increased from 1 to 5 for harder margin
         'Standardize', true, ...
         'Weights', class_weights_gpu);
     
@@ -266,7 +270,7 @@ for fold = 1:num_folds
         X_test_gpu = gpuArray(single(X_test_batch));
         
         % Get predictions for batch
-        [y_pred_batch_gpu, scores_batch_gpu] = predict(svm_model, X_test_gpu);
+        [y_pred_batch_gpu, scores_batch_gpu] = predict(afib_svm_model, X_test_gpu);
         
         % Move predictions back to CPU
         y_pred(start_idx:end_idx) = gather(y_pred_batch_gpu);
@@ -344,5 +348,5 @@ grid on;
 
 % Save the final trained model and essential variables
 fprintf('\nSaving model and essential variables...\n');
-save('afib_model.mat', 'svm_model', 'featureNames', 'Fs', 'class_weights');
+save('afib_model.mat', 'afib_svm_model', 'featureNames', 'Fs', 'class_weights');
 fprintf('Model saved successfully as afib_model.mat\n');
