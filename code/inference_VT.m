@@ -1,5 +1,5 @@
 %% Loop through each file and run the trained VT model, plot peaks, and report misclassifications
-load('vt_model.mat');
+load('models/vt_model.mat');
 
 folder = "databases/";
 fileList = dir(fullfile(folder, '*.hea'));
