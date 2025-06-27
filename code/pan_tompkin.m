@@ -362,22 +362,28 @@ qrs_i = qrs_i(1:Beat_C);
 %    end
 % end\
 
-Q_peaks=[];
+Q_peaks = [];
 S_peaks = [];
-for i = qrs_i_raw
-  [q_c,q_i] = min ( ecg_h(max(1,i - round(0.25*fs)): i));
+T_peaks = [];
+mid_points = [];
+num_beats = length(qrs_i_raw);
 
-  [s_c,s_i] = min ( ecg_h(i: min(i + round(0.25*fs),length(ecg_h)-1)));
-  Q_peaks = [Q_peaks, max(1, (i - (round(0.25*fs) - q_i + 1)))];  % Append Q peak
-
-  S_peaks = [S_peaks, i+s_i];
+for k = 1:num_beats-1
+    R1 = qrs_i_raw(k);
+    R2 = qrs_i_raw(k+1);
+    mid = round((R1 + R2)/2);
+    mid_points = [mid_points, mid];
+    % S peak: minimum in first half (R1 to mid)
+    [~, s_rel] = min(ecg_h(R1:mid));
+    S_peaks = [S_peaks, R1 + s_rel - 1];
+    % Q peak: minimum in second half (mid to R2)
+    [~, q_rel] = min(ecg_h(mid:R2));
+    Q_peaks = [Q_peaks, mid + q_rel - 1];
+    % T peak: maximum in second half (mid to R2)
+    [~, t_rel] = max(ecg_h(S_peaks(k):mid));
+    T_peaks = [T_peaks, S_peaks(k) + t_rel - 1];
 end
-
-T_peaks= [];
-for i = S_peaks
-  [t_c,t_i] = max ( ecg_h(i: min(i + round(0.25*fs),length(ecg_h)-1)));
-  T_peaks = [T_peaks, i+t_i];
-end
+% Optionally handle last beat (skip or extrapolate)
 
 Q_peaks_val = ecg_h(Q_peaks);
 S_peaks_val = ecg_h(S_peaks);
@@ -406,27 +412,15 @@ T_peaks_val = ecg_h(T_peaks);
    hold on,scatter(Q_peaks,ecg_h(Q_peaks),'b');
    hold on,scatter(S_peaks,ecg_h(S_peaks),'k');
    hold on,scatter(T_peaks,ecg_h(T_peaks),'g');
-   
+   hold on,scatter(mid_points,ecg_h(mid_points),'c','filled');
    hold on,plot(locs,NOISL_buf1,'LineWidth',2,'Linestyle','--','color','k');
    hold on,plot(locs,SIGL_buf1,'LineWidth',2,'Linestyle','-.','color','r');
    hold on,plot(locs,THRS_buf1,'LineWidth',2,'Linestyle','-.','color','g');
-  %  az(2)=subplot(312);plot(ecg_m);
-  %  title('QRS on MVI signal and Noise level(black),Signal Level (red) and Adaptive Threshold(green)');axis tight;
-  %  hold on,scatter(qrs_i,qrs_c,'m');
-  %  hold on,plot(locs,NOISL_buf,'LineWidth',2,'Linestyle','--','color','k');
-  %  hold on,plot(locs,SIGL_buf,'LineWidth',2,'Linestyle','-.','color','r');
-  %  hold on,plot(locs,THRS_buf,'LineWidth',2,'Linestyle','-.','color','g');
-  %  az(3)=subplot(313);
-  %  plot(ecg-mean(ecg));
-  %  title('Pulse train of the found QRS on ECG signal');
-  %  axis tight;
-  %  line(repmat(qrs_i_raw,[2 1]),...
-  %      repmat([min(ecg-mean(ecg))/2; max(ecg-mean(ecg))/2],size(qrs_i_raw)),...
-  %      'LineWidth',2.5,'LineStyle','-.','Color','r');
-  zoom on;
+   legend({'Filtered ECG','R peaks','Q peaks','S peaks','T peaks','Mid points'});
+   zoom on;
  end
 end
- 
+
 
 
 
