@@ -9,10 +9,18 @@ arrhythmiaData = struct();
 total_len=0;
 % Iterate over each file
 for i = 1:length(fileList)
+    filename = fileList{i};  % e.g., '205.hea'
+    % record_num = str2double(extractBefore(filename, '.hea'));
+    % if record_num < 201 || record_num > 234
+    %     fprintf('Skipping ECG signal: %d\n', record_num);
+    %     continue;
+    % end
+
     recordname = str2mat(fullfile(folder, fileList{i}(1:end-4))); % Remove file extension
     
     % Display file being processed
     display(['Reading ECG signal from file: ', recordname]);
+    addpath('/home/zainab/wfdbtoolboxmatlab/mcode');
     
     % Read ECG signal and annotations
     [ecg, Fs, tm] = rdsamp(recordname, 1);
@@ -233,9 +241,20 @@ for fold = 1:num_folds
     % Calculate class weights to handle imbalance
     num_afib = sum(y_train == 1);
     num_normal = sum(y_train == 0);
+    % class_weights = zeros(size(y_train));
+    % class_weights(y_train == 1) = (num_normal/num_afib) * 1.5;  % Increased weight for AFIB class
+    % class_weights(y_train == 0) = 1.2;                         % Slightly increased weight for Normal class
+    % class_weights_gpu = gpuArray(single(class_weights));
+    w_afib = 1 / sum(y_train == 1);
+    w_normal = 1 / sum(y_train == 0);
+
     class_weights = zeros(size(y_train));
-    class_weights(y_train == 1) = (num_normal/num_afib) * 1.5;  % Increased weight for AFIB class
-    class_weights(y_train == 0) = 1.2;                         % Slightly increased weight for Normal class
+    class_weights(y_train == 1) = w_afib;
+    class_weights(y_train == 0) = w_normal;
+
+    % Normalize weights so their sum = number of samples (optional)
+    class_weights = class_weights * length(y_train) / sum(class_weights);
+
     class_weights_gpu = gpuArray(single(class_weights));
     
     % Train SVM on GPU
